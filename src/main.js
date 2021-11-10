@@ -1,20 +1,10 @@
-"use strict";
-
-const path = require("path");
-const glob = require("glob");
-const isLocal = typeof process.pkg === "undefined";
-const basePath = (isLocal ? process.cwd() : path.dirname(process.execPath));
-const { NETWORK } = require(path.join(basePath, "constants/network.js"));
+const basePath = process.cwd();
+const { NETWORK } = require(`${basePath}/constants/network.js`);
 const fs = require("fs");
-const { hasUncaughtExceptionCaptureCallback, exit } = require("process");
-const sha1 = require(path.join(basePath, "/node_modules/sha1"));
-const { createCanvas, loadImage } = require(path.join(
-  basePath,
-  "/node_modules/canvas"
-));
-const buildDir = path.join(basePath, "/build");
-const layersDir = path.join(basePath, "/layers");
-const imageCache = {};
+const sha1 = require(`${basePath}/node_modules/sha1`);
+const { createCanvas, loadImage } = require(`${basePath}/node_modules/canvas`);
+const buildDir = `${basePath}/build`;
+const layersDir = `${basePath}/layers`;
 const {
   format,
   baseUri,
@@ -31,7 +21,7 @@ const {
   network,
   solanaMetadata,
   gif,
-} = require(path.join(basePath, "/src/config.js"));
+} = require(`${basePath}/src/config.js`);
 const canvas = createCanvas(format.width, format.height);
 const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = format.smoothing
@@ -39,10 +29,7 @@ var metadataList = [];
 var attributesList = [];
 var dnaList = new Set();
 const DNA_DELIMITER = "-";
-const HashlipsGiffer = require(path.join(
-  basePath,
-  "/modules/HashlipsGiffer.js"
-));
+const HashlipsGiffer = require(`${basePath}/modules/HashlipsGiffer.js`);
 
 let hashlipsGiffer = null;
 
@@ -51,10 +38,10 @@ const buildSetup = () => {
     fs.rmdirSync(buildDir, { recursive: true });
   }
   fs.mkdirSync(buildDir);
-  fs.mkdirSync(path.join(buildDir, "/json"));
-  fs.mkdirSync(path.join(buildDir, "/images"));
+  fs.mkdirSync(`${buildDir}/json`);
+  fs.mkdirSync(`${buildDir}/images`);
   if (gif.export) {
-    fs.mkdirSync(path.join(buildDir, "/gifs"));
+    fs.mkdirSync(`${buildDir}/gifs`);
   }
 };
 
@@ -70,7 +57,7 @@ const getRarityWeight = (_str) => {
 };
 
 const cleanDna = (_str) => {
-  const withoutOptions = removeQueryStrings(_str)
+  const withoutOptions = removeQueryStrings(_str);
   var dna = Number(withoutOptions.split(":").shift());
   return dna;
 };
@@ -134,7 +121,7 @@ const layersSetup = (layersOrder) => {
     bypassDNA:
       layerObj.options?.["bypassDNA"] !== undefined
         ? layerObj.options?.["bypassDNA"]
-        : false
+        : false,
   }));
   return layers;
 };
@@ -301,23 +288,23 @@ const constructLayerToDna = (_dna = "", _layers = []) => {
  * @returns new DNA string with any items that should be filtered, removed.
  */
 const filterDNAOptions = (_dna) => {
-  const dnaItems = _dna.split(DNA_DELIMITER)
-  const filteredDNA = dnaItems.filter(element => {
+  const dnaItems = _dna.split(DNA_DELIMITER);
+  const filteredDNA = dnaItems.filter((element) => {
     const query = /(\?.*$)/;
     const querystring = query.exec(element);
     if (!querystring) {
-      return true
+      return true;
     }
     const options = querystring[1].split("&").reduce((r, setting) => {
       const keyPairs = setting.split("=");
       return { ...r, [keyPairs[0]]: keyPairs[1] };
     }, []);
 
-    return options.bypassDNA
-  })
+    return options.bypassDNA;
+  });
 
-  return filteredDNA.join(DNA_DELIMITER)
-}
+  return filteredDNA.join(DNA_DELIMITER);
+};
 
 /**
  * Cleaning function for DNA strings. When DNA strings include an option, it
@@ -329,8 +316,8 @@ const filterDNAOptions = (_dna) => {
  */
 const removeQueryStrings = (_dna) => {
   const query = /(\?.*$)/;
-  return _dna.replace(query, '')
-}
+  return _dna.replace(query, "");
+};
 
 const isDnaUnique = (_DnaList = new Set(), _dna = "") => {
   const _filteredDNA = filterDNAOptions(_dna);
@@ -351,7 +338,9 @@ const createDna = (_layers) => {
       random -= layer.elements[i].weight;
       if (random < 0) {
         return randNum.push(
-          `${layer.elements[i].id}:${layer.elements[i].filename}${layer.bypassDNA? '?bypassDNA=true' : ''}`
+          `${layer.elements[i].id}:${layer.elements[i].filename}${
+            layer.bypassDNA ? "?bypassDNA=true" : ""
+          }`
         );
       }
     }
