@@ -1,10 +1,12 @@
 "use strict";
 
 const path = require("path");
+const glob = require("glob");
 const isLocal = typeof process.pkg === "undefined";
-const basePath = isLocal ? process.cwd() : path.dirname(process.execPath);
+const basePath = (isLocal ? process.cwd() : path.dirname(process.execPath));
 const { NETWORK } = require(path.join(basePath, "constants/network.js"));
 const fs = require("fs");
+const { hasUncaughtExceptionCaptureCallback, exit } = require("process");
 const sha1 = require(path.join(basePath, "/node_modules/sha1"));
 const { createCanvas, loadImage } = require(path.join(
   basePath,
@@ -12,6 +14,7 @@ const { createCanvas, loadImage } = require(path.join(
 ));
 const buildDir = path.join(basePath, "/build");
 const layersDir = path.join(basePath, "/layers");
+const imageCache = {};
 const {
   format,
   baseUri,
@@ -31,6 +34,7 @@ const {
 } = require(path.join(basePath, "/src/config.js"));
 const canvas = createCanvas(format.width, format.height);
 const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = format.smoothing
 var metadataList = [];
 var attributesList = [];
 var dnaList = new Set();
@@ -82,12 +86,31 @@ const getElements = (path) => {
     .readdirSync(path)
     .filter((item) => !/(^|\/)\.[^\/\.]/g.test(item))
     .map((i, index) => {
+      let frames = {};
+      let maxFrames = 0;
+      let fullpath = path + "/" + i;
+      if(!fullpath.endsWith(".png")){
+        fs.readdirSync(fullpath).forEach(file => {
+          let match = file.match(/frame\s*(\d+)/i);
+            if(match != null){
+              maxFrames = Math.max(maxFrames, match[1]);
+              frames[match[1]] = fullpath + "/" + file;
+            }
+        });
+
+        for(let i = 1; i <= maxFrames; i++){
+          if(frames[i] === undefined)
+            frames[i] = frames[i-1];
+        }
+      }
       return {
         id: index,
         name: cleanName(i),
         filename: i,
-        path: `${path}${i}`,
+        path: fullpath,
         weight: getRarityWeight(i),
+        maxFrameCount: maxFrames,
+        frames: frames,
       };
     });
 };
@@ -95,7 +118,7 @@ const getElements = (path) => {
 const layersSetup = (layersOrder) => {
   const layers = layersOrder.map((layerObj, index) => ({
     id: index,
-    elements: getElements(`${layersDir}/${layerObj.name}/`),
+    elements: getElements(path.join(layersDir, layerObj.name)),
     name:
       layerObj.options?.["displayName"] != undefined
         ? layerObj.options?.["displayName"]
@@ -118,20 +141,42 @@ const layersSetup = (layersOrder) => {
 
 const saveImage = (_editionCount) => {
   fs.writeFileSync(
-    `${buildDir}/images/${_editionCount}.png`,
+    path.join(buildDir, `images/${_editionCount}.png`),
     canvas.toBuffer("image/png")
   );
 };
 
-const genColor = () => {
+const genHue = () => {
   let hue = Math.floor(Math.random() * 360);
-  let pastel = `hsl(${hue}, 100%, ${background.brightness})`;
+  return hue;
+};
+
+const genColor = (hue, alpha, brightness) => {
+  let pastel = `hsla(${hue}, 100%, ${brightness}, ${alpha})`;
   return pastel;
 };
 
-const drawBackground = () => {
-  ctx.fillStyle = background.static ? background.default : genColor();
+const drawBackground = () => {  
+  ctx.fillStyle = background.static ? background.default : genColor(genHue(), 1, background.brightness);
   ctx.fillRect(0, 0, format.width, format.height);
+
+  if(background.gradient){
+    let gradient = ctx.createLinearGradient(0, Math.random() * format.height, format.width, Math.random() * format.height);
+    let hue1 = genHue();
+    let hue2 = genHue();
+    gradient.addColorStop(0.0, genColor(hue1, Math.random(), '50%'));
+    gradient.addColorStop(1.0, genColor(hue2, Math.random(), '50%')); 
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, format.width, format.height);
+
+    gradient = ctx.createLinearGradient(Math.random() * format.width, 0, Math.random() * format.width, format.height);
+    hue1 = genHue();
+    hue2 = genHue();
+    gradient.addColorStop(0.0, genColor(hue1, Math.random() * 0.5, '80%'));
+    gradient.addColorStop(1.0, genColor(hue2, Math.random() * 0.5, '80%')); 
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, format.width, format.height);
+  }
 };
 
 const addMetadata = (_dna, _edition) => {
@@ -179,16 +224,27 @@ const addMetadata = (_dna, _edition) => {
 
 const addAttributes = (_element) => {
   let selectedElement = _element.layer.selectedElement;
+  if([ "Base", "Head" ].includes(_element.layer.name)) return;
   attributesList.push({
     trait_type: _element.layer.name,
     value: selectedElement.name,
   });
 };
 
-const loadLayerImg = async (_layer) => {
+const loadLayerImg = async (_layer, _frameIndex) => {
   return new Promise(async (resolve) => {
-    const image = await loadImage(`${_layer.selectedElement.path}`);
-    resolve({ layer: _layer, loadedImage: image });
+    let pathname = _layer.selectedElement.path;
+    if(_layer.selectedElement.maxFrameCount){
+      _frameIndex = _frameIndex % (_layer.selectedElement.maxFrameCount);
+      pathname = _layer.selectedElement.frames[_frameIndex];
+    }
+    let image = imageCache[pathname];
+    if(image === undefined){
+      //console.log("Opening: " + pathname);
+      image = await loadImage(`${pathname}`);
+      imageCache[pathname] = image;
+    }
+    resolve({ layer: _layer, frameIndex: _frameIndex, loadedImage: image });
   });
 };
 
@@ -362,54 +418,76 @@ const startCreating = async () => {
       let newDna = createDna(layers);
       if (isDnaUnique(dnaList, newDna)) {
         let results = constructLayerToDna(newDna, layers);
-        let loadedElements = [];
 
+        let maxFrames = 0;
+        let choices =  {};
         results.forEach((layer) => {
-          loadedElements.push(loadLayerImg(layer));
+          choices[layer.name] = layer.selectedElement.name;
+          maxFrames = Math.max(maxFrames, layer.selectedElement.maxFrameCount);
+        });
+        results.forEach((layer) => {
+          if(layer.selectedElement.name == "Face Item" && choices['Hat'].includes('Mask')){
+            console.log("Invalid Config!");
+            failedCount++;
+            return;
+          }
         });
 
-        await Promise.all(loadedElements).then((renderObjectArray) => {
-          debugLogs ? console.log("Clearing canvas") : null;
-          ctx.clearRect(0, 0, format.width, format.height);
-          if (gif.export) {
-            hashlipsGiffer = new HashlipsGiffer(
-              canvas,
-              ctx,
-              `${buildDir}/gifs/${abstractedIndexes[0]}.gif`,
-              gif.repeat,
-              gif.quality,
-              gif.delay
-            );
-            hashlipsGiffer.start();
-          }
-          if (background.generate) {
-            drawBackground();
-          }
-          renderObjectArray.forEach((renderObject, index) => {
-            drawElement(
-              renderObject,
-              index,
-              layerConfigurations[layerConfigIndex].layersOrder.length
-            );
-            if (gif.export) {
-              hashlipsGiffer.add();
-            }
-          });
-          if (gif.export) {
-            hashlipsGiffer.stop();
-          }
-          debugLogs
-            ? console.log("Editions left to create: ", abstractedIndexes)
-            : null;
-          saveImage(abstractedIndexes[0]);
-          addMetadata(newDna, abstractedIndexes[0]);
-          saveMetaDataSingleFile(abstractedIndexes[0]);
-          console.log(
-            `Created edition: ${abstractedIndexes[0]}, with DNA: ${sha1(
-              newDna
-            )}`
+        if (gif.export) {
+          hashlipsGiffer = new HashlipsGiffer(
+            canvas,
+            ctx,
+            `${buildDir}/gifs/${abstractedIndexes[0]}.gif`,
+            gif.repeat,
+            gif.quality,
+            gif.delay
           );
-        });
+          hashlipsGiffer.start();
+        }
+        //console.log(`maxFrames ${maxFrames}`);
+
+        for(let frameIndex = 0; frameIndex <= maxFrames; frameIndex++){
+
+          let loadedElements = [];
+          results.forEach((layer) => {
+            loadedElements.push(loadLayerImg(layer, frameIndex));
+          });
+
+          await Promise.all(loadedElements).then((renderObjectArray) => {
+            debugLogs ? console.log("Clearing canvas") : null;
+            ctx.clearRect(0, 0, format.width, format.height);
+            if (background.generate && choices['Background'] == 'Random') {
+              drawBackground();
+            }
+            renderObjectArray.forEach((renderObject, index) => {
+              drawElement(
+                renderObject,
+                index,
+                layerConfigurations[layerConfigIndex].layersOrder.length
+              );
+            });
+          });
+
+          if (gif.export) {
+            hashlipsGiffer.add();
+          }
+        }
+        if (gif.export) {
+          hashlipsGiffer.stop();
+        }
+
+        debugLogs
+          ? console.log("Editions left to create: ", abstractedIndexes)
+          : null;
+        saveImage(abstractedIndexes[0]);
+        addMetadata(newDna, abstractedIndexes[0]);
+        saveMetaDataSingleFile(abstractedIndexes[0]);
+        console.log(
+          `Created edition: ${abstractedIndexes[0]}, with DNA: ${sha1(
+            newDna
+          )}`
+        );
+
         dnaList.add(filterDNAOptions(newDna));
         editionCount++;
         abstractedIndexes.shift();
@@ -420,6 +498,8 @@ const startCreating = async () => {
           console.log(
             `You need more layers or elements to grow your edition to ${layerConfigurations[layerConfigIndex].growEditionSizeTo} artworks!`
           );
+          layerConfigIndex = layerConfigurations.length
+          break;
           process.exit();
         }
       }

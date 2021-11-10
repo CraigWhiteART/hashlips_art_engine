@@ -6,20 +6,20 @@ const basePath = isLocal ? process.cwd() : path.dirname(process.execPath);
 const { MODE } = require(path.join(basePath, "constants/blend_mode.js"));
 const { NETWORK } = require(path.join(basePath, "constants/network.js"));
 
-const network = NETWORK.eth;
+const network = NETWORK.sol;
 
 // General metadata for Ethereum
-const namePrefix = "Your Collection";
-const description = "Remember to replace this description";
-const baseUri = "ipfs://NewUriToReplace";
+const namePrefix = "Harambe Life";
+const description = "Have fun with harambe";
+const baseUri = "ipfs://QmYTiHjYiankWuyhhKh7KY3ZVtkUptyAHAMx28rw6igMsR";
 
 const solanaMetadata = {
   symbol: "YC",
   seller_fee_basis_points: 1000, // Define how much % you want from secondary market sales 1000 = 10%
-  external_url: "https://www.youtube.com/c/hashlipsnft",
+  external_url: "https://www.youtube.com/channel/UCD_6td37ZWACg0P4TF720TQ",
   creators: [
     {
-      address: "7fXNuer5sbZtaTEPhtJ5g5gNtuyRoKkvxdjEjEnPN4mC",
+      address: "CP5cFHrpKp1j8U3SeQMojuXVeuNnsJAcyMrXUwezXdCb",
       share: 100,
     },
   ],
@@ -28,15 +28,19 @@ const solanaMetadata = {
 // If you have selected Solana then the collection starts from 0 automatically
 const layerConfigurations = [
   {
-    growEditionSizeTo: 5,
+    growEditionSizeTo: 10000,
     layersOrder: [
       { name: "Background" },
-      { name: "Eyeball" },
-      { name: "Eye color" },
-      { name: "Iris" },
-      { name: "Shine" },
-      { name: "Bottom lid" },
-      { name: "Top lid" },
+      { name: "Base", options: {
+          bypassDNA: false,
+        }
+      },
+      { name: "Head" },
+      { name: "Body" },
+      { name: "Body Item" },
+      { name: "Face Item" },
+      { name: "Hat" },
+      { name: "Hand" },
     ],
   },
 ];
@@ -48,10 +52,11 @@ const debugLogs = false;
 const format = {
   width: 512,
   height: 512,
+  smoothing: false,
 };
 
 const gif = {
-  export: false,
+  export: true,
   repeat: 0,
   quality: 100,
   delay: 500,
@@ -76,7 +81,8 @@ const pixelFormat = {
 
 const background = {
   generate: true,
-  brightness: "80%",
+  brightness: "60%",
+  gradient: true,
   static: false,
   default: "#000000",
 };
